@@ -1,120 +1,260 @@
-const fs = require("fs");
-const axios = require("axios");
-const inquirer = require("inquirer");
-const pdf = require('html-pdf');
+const inquirer = require('inquirer')
 
-const questions = [
-  {
-    type: 'input',
-    name: 'name',
-    message: "Enter your Github username",
-    answer: ""
-  },
-  {
-    type: 'input',
-    name: 'color',
-    message: "Enter your favorite color"
-  }
-]
+const mysql = require('mysql')
+const consoleTable = require('console.table')
 
-function createPDF(uDataUser) {
-  const html = fs.readFileSync('./prof.html', 'utf8');
-  const options = { format: 'Letter' };
-  pdf.create(html, options).toFile(`./${uDataUser}.pdf`, function(err, res) {
-    if (err) return console.log(err);
-    // console.log(res)
-    console.log(`PDF ${uDataUser} Written to Disk`); // { filename: '/app/businesscard.pdf' }
-  });
-}
+const questions = require('./question')
 
-function buildProf(answers, github, uDataStar) {
-  const uDataUser = answers.name
-  const uDataColor = answers.color
-  const uDataImg = github.data.avatar_url
-  const uDataBlog = github.data.blog
-  const uDataBio = github.data.bio
-  const uDataRepo = github.data.public_repos
-  const uDataFollower = github.data.followers
-  const uDataFollowing = github.data.following
-  const uDataLocation = github.data.location
-  const HTML = `
-    <!DOCTYPE html>
-    <html lang="en">
-    <head>
-    <meta charset="utf-8">
-    <meta http-equiv="X-UA-Compatible" content="IE=edge">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title></title>
-      <style>
-        body { text-align:center; }
-        div { background-color:${uDataColor};
-              display: inline-block;
-              margin: 10px;
-              padding: 10px;
-              border: 2px solid black;
-              border-radius: 7px; }
-      </style>
-    </head>
-      <body>
-        <div><img src="${uDataImg}" height="250" width="250">
-          <h2>${uDataUser}</h2></div><br/>
-        <div><h3>${uDataBio}</h3>
-        <h3>GitHub - http://github.com/${uDataUser}/
-          <h3>Blog - ${uDataBlog}<h3></div><br/>
-        <div><h3>${uDataRepo} Repos
-          | ${uDataFollower} Followers
-          | ${uDataStar} Stars
-          | ${uDataFollowing} Following</h3></div><br/>
-        <div><img src="http://maps.googleapis.com/maps/api/staticmap?center=${uDataLocation}&amp;zoom=12&amp;size=800x250&amp;key=AIzaSyCmj71F1XA3hoYnJsTjY2uWeUmNnPlvaVU">
-        <h3>${uDataLocation}</h3></div>
-      </body>
-    </html>
-    `
-  // console.log(answers, uDataImg)
-  fs.writeFile("prof.html", HTML, function(err) {
-    if (err) {
-      return console.log(err);
-    }
-    console.log("HTML Written to Disk");
-    createPDF(uDataUser)
-  });
-}
 
-function starCall(answers, github) {
-    let name = answers.name
-    let uDataStar1
-    axios.get(`https://api.github.com/users/${name}/starred`
-    )
-    .then(function (response) {
-      let uDataStar0 = response.data.map(x => x.id);
-      uDataStar1 = uDataStar0.length
-      // uDataStar = response.length
-      // console.log(uDataStar1 + " has a value")
-      buildProf(answers, github, uDataStar1)
-    })
-    .catch(function (error) {
-      console.log(error);
-    })
-  }
 
-function gitCall(answers) {
-  let name = answers.name
-  axios.get(`https://api.github.com/users/${name}`
-  )
-  .then(function (response) {
-    github = response
-    starCall(answers, github)
-  })
-  .catch(function (error) {
-    console.log(error);
-  })
-}
-
-inquirer.prompt(questions)
-  .then(answers => {
-    // console.log(JSON.stringify(answers, null, '  '))
-    gitCall(answers)
-  })
-  .catch(function(err) {
-    console.log(err);
+const connection = mysql.createConnection({
+    host: 'localhost',
+    port: 3306,
+    user: 'root',
+    password: '',
+    database: 'employeeDB'
 });
+
+connection.connect(err => {
+    if (err) throw err;
+})
+
+userPrompt()
+async function userPrompt() {
+    const results = await inquirer.prompt(questions.prompts);
+    switch (results.prompts) {
+        case 'View all employees':
+            viewAllEmployees();
+            break;
+
+        case 'View all employees by department':
+            viewAllEmployeesByDepartment();
+            break;
+
+        case 'View all employees by manager':
+            viewAllEmployeesByManager();
+            break;
+
+        case 'Add an employee':
+            addEmployee();
+            break;
+
+        case 'Remove an employee':
+            removeEmployee();
+            break;
+
+        case 'Update employee role':
+            updateEmployeeRole();
+            break;
+
+        case 'Update employee manager':
+            updateEmployeeManager();
+            break;
+
+        case 'View all roles':
+            viewAllRoles();
+            break;
+
+        case 'Add role':
+            addRole();
+            break;
+
+        case 'Remove role':
+            removeRole();
+            break;
+
+        default:
+            connection.end()
+            break;
+    }
+}
+
+function viewAllEmployees() {
+    connection
+        .query(`SELECT employee.employeeID, employee.firstName, employee.lastName, department.departmentName, role.title, role.salary
+        FROM employee
+        LEFT JOIN role ON employee.employeeRole = role.roleID
+        LEFT JOIN department ON role.departmentId = department.departmentID
+        ORDER BY employee.employeeID`, (err, res) => {
+
+            console.table(res)
+            if (err) throw err;
+            userPrompt()
+        });
+}
+
+function viewAllEmployeesByDepartment() {
+    const sqlList = `SELECT * FROM department`
+    connection.query(sqlList, function (err, result) {
+        if (err) {
+            console.log(err)
+        } else {
+            let question = [{
+                type: "list",
+                message: "Which department would you like to view?",
+                name: "department",
+                choices: result.map(result => result.departmentName)
+            }]
+            inquirer
+                .prompt(question)
+                .then(res => {
+                    const query = `SELECT employee.employeeID, employee.firstName, employee.lastName, department.departmentName, role.title, role.salary
+                            FROM employee
+                            LEFT JOIN role ON employee.employeeRole = role.roleID
+                            LEFT JOIN department ON role.departmentID = department.departmentID
+                            WHERE department.departmentName = "${res.department}"
+                            ORDER BY employee.employeeID ASC`
+                    connection.query(query, (err, result) => {
+                        if (err) {
+                            console.log(err)
+                        } else {
+                            console.table(result)
+                            userPrompt()
+                        }
+                    })
+                })
+        }
+    })
+}
+
+function addEmployee() {
+    connection
+        .query(`SELECT * FROM employee`, (err, results) => {
+            if (err) throw err
+
+            inquirer
+                .prompt([
+                    {
+                        name: 'firstName',
+                        type: 'input',
+                        message: 'Enter the first name of the new employee'
+                    },
+                    {
+                        name: 'lastName',
+                        type: 'input',
+                        message: 'Enter the last name of the new employee'
+                    },
+                    {
+                        name: 'roleID',
+                        type: 'number',
+                        message: `Enter the new employee\'s role id 
+                        (1 = Sales Lead, 2 = Sales Person, 3 = Lead Engineer, 4 = Software Engineer, 5 = Accountant, 6 = Legal Team Lead, 7 = Lawyer)
+                        `
+                    }
+                ])
+                .then((res) => {
+                    let query = `INSERT INTO employee SET ?`
+                    const values = {
+                        firstName: res.firstName,
+                        lastName: res.lastName,
+                        employeeRole: res.roleID,
+
+                    }
+                    connection.query(query, values, (err) => {
+                        if (err) throw err;
+                        console.log('New employee added!')
+                        console.table(res)
+                        userPrompt();
+                    })
+
+                })
+        }
+        )
+}
+
+
+function removeEmployee() {
+    connection
+        .query(`SELECT * FROM employee`, (err) => {
+            if (err) throw err
+
+            inquirer
+                .prompt([
+                    {
+                        name: 'firstName',
+                        type: 'input',
+                        message: 'Enter the first name of the employee you would like to remove'
+                    },
+                    {
+                        name: 'lastName',
+                        type: 'input',
+                        message: 'Enter the last name of the employee you would like to remove'
+                    },
+
+                ])
+                .then((res) => {
+                    let query = `DELETE FROM employee WHERE ? `
+                    const values = {
+                        firstName: res.firstName,
+                        lastName: res.lastName
+                    }
+                    connection.query(query, values, (err) => {
+                        if (err) throw err;
+                        console.log('Empoyee removed!')
+                        console.table(res)
+                        userPrompt();
+                    })
+                    // console.log(res)
+                })
+        }
+        )
+}
+
+function updateEmployeeRole() {
+    connection.query(`SELECT * FROM employee`, err => {
+        inquirer.prompt([
+            {
+                name: ''
+            }
+        ])
+    })
+}
+
+
+function viewAllRoles() {
+    connection.query(`SELECT title FROM role`, (err, res) => {
+        console.table(res)
+        if (err) throw err;
+        userPrompt();
+    })
+}
+
+function addRole() {
+    connection.query(`SELECT * FROM role`, (err, res) => {
+        if (err) throw err
+
+        inquirer
+            .prompt([
+                {
+                    name: 'newRoleTitle',
+                    type: 'input',
+                    message: 'Enter the the of the role you would like to add'
+                },
+                {
+                    name: 'newRoleID',
+                    type: 'number',
+                    message: 'Enter the ID you would like to give this role.  Make sure the ID is not being used for another role'
+                },
+                {
+                    name: 'newRoleSalary',
+                    type: 'number',
+                    message: 'Enter the salary of the new role'
+                }
+            ])
+            .then((res) => {
+                let query = `INSERT INTO role SET ?`
+                const values = {
+                    title: res.newRoleTitle,
+                    roleID: res.newRole,
+                    salary: res.newRoleSalary
+                }
+                connection.query(query, values, (err) => {
+                    if (err) throw err
+                    console.log('New role added!')
+                    console.table(res)
+                    userPrompt();
+                })
+            }
+            )
+    })
+}
